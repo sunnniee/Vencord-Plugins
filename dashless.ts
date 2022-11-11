@@ -39,10 +39,10 @@ export default definePlugin({
             // sidebar channel list
             find: "().overflow),ref",
             replacement: {
-                match: /var (.{1,2})=(.{1,2}).children,(.{0,120});return (.{1,2})\.createElement\(/,
+                match: /var (.{1,2})=(.{1,2}).children,(.{0,120});return\(/,
                 replace: "var $1=$2.children,$3;\
                 if(typeof $1[0].props?.children==='string')$1[0].props.children=$1[0].props.children.replace(/-/g,' ');\
-                return $4.createElement("
+                return("
             }
         },
         {

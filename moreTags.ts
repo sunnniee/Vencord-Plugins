@@ -130,7 +130,7 @@ ${t.botAndOpCases ? `case ${types}.${t.name}_OP:${text}="OP • ${t.displayName}
         {
             find: ".Types.ORIGINAL_POSTER",
             replacement: {
-                match: /return null==(.)\?null:.\.createElement\((.)\.Z/,
+                match: /return null==(.{1,2})\?null:\(0,/,
                 replace: (orig, type) =>
                     `${type}=Vencord.Plugins.plugins["More Tags"].getTagForMessage(arguments[0],${type});${orig}`
             },
