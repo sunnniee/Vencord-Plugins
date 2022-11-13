@@ -70,14 +70,21 @@ export default definePlugin({
             replace: "Fragment,{children:[Vencord.Plugins.plugins.ShittyPlatformIndicators.indicatorSidebarDecoration(this.props),$1]"
         }
     }],
-    options: Object.fromEntries(statuses.map(s =>
-        [s, {
-            description: `Color of ${s} statuses`,
-            type: OptionType.STRING,
-            default: colors[s],
-            restartNeeded: false,
-        }]
-    )),
+    options: {
+        hideForBots: {
+            description: "Hide the platform indicator for bots",
+            type: OptionType.BOOLEAN,
+            restartNeeded: false
+        },
+        ...Object.fromEntries(statuses.map(s =>
+            [s, {
+                description: `Color of ${s} statuses`,
+                type: OptionType.STRING,
+                default: colors[s],
+                restartNeeded: false,
+            }]
+        ))
+    },
 
     icon(color: string) {
         return {
@@ -91,7 +98,9 @@ export default definePlugin({
 
     indicatorMessageDecoration(decorations: Decorations): Decorations {
         if (!decorations?.[1]) return decorations;
-        const id = decorations[1].find(i => i.key === "new-member")?.props.message?.author?.id;
+        const user = decorations[1].find(i => i.key === "new-member")?.props.message?.author;
+        if (user?.bot && Settings.plugins[this.name].hideForBots) return decorations;
+        const id = user?.id;
         if (!id) return decorations;
 
         const children: JSX.Element[] = [];
@@ -99,7 +108,7 @@ export default definePlugin({
         if (!status || !Object.values(status).length) return decorations;
         Object.entries(status).forEach(([platform, status]) => {
             children.push(
-                this.icon(Settings.plugins.ShittyPlatformIndicators[status] || colors[status])[platform]
+                this.icon(Settings.plugins[this.name][status] || colors[status])[platform]
             );
         });
         const IndicatorContainer = React.createElement("Fragment", {
@@ -111,7 +120,9 @@ export default definePlugin({
     },
 
     indicatorSidebarDecoration(props: any): JSX.Element | null {
-        const id = props?.user?.id;
+        const { user } = props;
+        if (user?.bot && Settings.plugins[this.name].hideForBots) return null;
+        const id = user?.id;
         if (!id) return null;
         const status = statusOf(id);
         if (!status) return null;
@@ -120,7 +131,7 @@ export default definePlugin({
             key: "indicator",
             style: { paddingLeft: 2 }
         }, Object.entries(status).map(([platform, status]) =>
-            this.icon(Settings.plugins.ShittyPlatformIndicators[status] || colors[status])[platform]
+            this.icon(Settings.plugins[this.name][status] || colors[status])[platform]
         ));
     }
 });
