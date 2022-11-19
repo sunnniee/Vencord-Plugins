@@ -118,11 +118,12 @@ ${t.botAndOpCases ? `${types}[${types}.${t.name}_OP=${i--}]="${t.name}_OP";${typ
                         ).join("")}${orig}`
                 },
                 {
-                    match: /case (.)\.BOT:default:(.)=/,
-                    replace: (orig, types, text) =>
+                    match: /case (.)\.BOT:default:(.)=(.{1,20})\.BOT/,
+                    replace: (orig, types, text, strings) =>
                         `${tags.map(t =>
                             `case ${types}.${t.name}:${text}="${t.displayName}";break;\
-${t.botAndOpCases ? `case ${types}.${t.name}_OP:${text}="OP • ${t.displayName}";break;case ${types}.${t.name}_BOT:${text}="BOT • ${t.displayName}";break;` : ""}`
+${t.botAndOpCases ? `case ${types}.${t.name}_OP:${text}=${strings}.BOT_TAG_FORUM_ORIGINAL_POSTER+" • ${t.displayName}";break;\
+case ${types}.${t.name}_BOT:${text}=${strings}.BOT_TAG_BOT+" • ${t.displayName}";break;` : ""}`
                         ).join("")}${orig}`
                 },
             ],
