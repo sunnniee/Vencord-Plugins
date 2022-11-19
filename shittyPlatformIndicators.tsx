@@ -64,9 +64,10 @@ function IndicatorSVG(props: { variant: PlatformType, color: string; }): JSX.Ele
     }
 }
 
-function Indicator(props: { status: Status; }): JSX.Element {
+function Indicator(props: { status: Status; }): JSX.Element | null {
     const { status } = props;
     const statuses = Object.entries(status);
+    if (!statuses.length) return null;
     // not padded for mobile as the svg itself leaves a gap
     return <span key="indicators" style={{ paddingLeft: statuses[0][0] === "mobile" ? 0 : 4 }}>
         {statuses.map(([platform, status]) =>
