@@ -20,6 +20,13 @@ see [the vencord repo](https://github.com/vendicated/vencord#installing-plugins)
 
 ![image](https://user-images.githubusercontent.com/78964224/201352811-ecd6951c-1a83-4e54-8e88-9890059047bd.png)
 
+## PermissionViewer
+Adds an option to context menus to view the permission of a user or role
+
+![image](https://user-images.githubusercontent.com/78964224/202854570-1372d62a-ec60-4da0-b6e6-dec0fea62863.png)
+![image](https://user-images.githubusercontent.com/78964224/202854592-992639a7-203c-4ddf-be72-70fb669c7d00.png)
+
+
 ## ShittyPlatformIndicators
 exists
 
