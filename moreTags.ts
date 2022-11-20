@@ -22,7 +22,7 @@ import { Devs } from "../utils/constants";
 import definePlugin, { OptionType } from "../utils/types";
 import { Settings } from "../Vencord";
 import { waitFor } from "../webpack";
-import { GuildStore } from "../webpack/common";
+import { ChannelStore, GuildStore } from "../webpack/common";
 
 let Permissions: Record<string, bigint>, computePermissions: ({ ...args }) => bigint,
     Tags: Record<string, number> /* really a Record<(string, number) | (number, string)> but not needed here*/;
@@ -132,15 +132,41 @@ case ${types}.${t.name}_BOT:${text}=${strings}.BOT_TAG_BOT+" • ${t.displayName
             find: ".Types.ORIGINAL_POSTER",
             replacement: {
                 match: /return null==(.{1,2})\?null:\(0,/,
-                replace: (orig, type) =>
-                    `${type}=Vencord.Plugins.plugins["More Tags"].getTagForMessage(arguments[0],${type});${orig}`
-            },
+                replace: (orig, type) => `${type}=Vencord.Plugins.plugins["More Tags"]\
+.getTag({...arguments[0],channelId:arguments[0].channel?.id,origType:${type}});${orig}`
+            }
         },
         {
             find: ".renderBot=function(){",
             replacement: {
-                match: /this.props.user;return null.{0,15}\?(.{0,50})\(\)\.botTag/,
-                replace: "this.props.user;var type=Vencord.Plugins.plugins[\"More Tags\"].getTagForSidebar(this.props);return type!==null?$1().botTag,type"
+                match: /this.props.user;return null!=(.{1,2})&&.{0,10}\?(.{0,50})\(\)\.botTag/,
+                replace: "this.props.user;var type=Vencord.Plugins.plugins[\"More Tags\"]\
+.getTag({...this.props,channelId:this.props.channel.id,origType:$1.bot?0:null});\
+return type!==null?$2().botTag,type"
+            }
+        },
+        {
+            find: ",botType:",
+            replacement: {
+                match: /,botType:(.{1,2}\((.{1,2})\)),/,
+                replace: ",botType:Vencord.Plugins.plugins[\"More Tags\"]\
+.getTag({user:$2,channelId:arguments[0].moreTags_channelId,origType:$1}),"
+            }
+        },
+
+        // :trollface:
+        {
+            find: ".hasAvatarForGuild(null==",
+            replacement: {
+                match: /\(\).usernameSection,user/,
+                replace: "().usernameSection,moreTags_channelId:arguments[0].channelId,user"
+            }
+        },
+        {
+            find: "().copiableNameTag",
+            replacement: {
+                match: /discriminatorClass:(.{1,100}),botClass:/,
+                replace: "discriminatorClass:$1,moreTags_channelId:arguments[0].moreTags_channelId,botClass:"
             }
         }
     ],
@@ -155,9 +181,12 @@ case ${types}.${t.name}_BOT:${text}=${strings}.BOT_TAG_BOT+" • ${t.displayName
         ).filter(i => i);
     },
 
-    getTagForMessage(args: any, origType: number): number {
-        const { message, user, channel } = args;
-        let type = origType;
+    getTag(args: any) {
+        // note: everything other than user can be undefined
+        const { message, user, channelId, origType } = args;
+        let type = typeof origType === "number" ? origType : null;
+        const channel = ChannelStore.getChannel(channelId) as any;
+        if (!channel) return type;
         const settings = Settings.plugins[this.name];
         const perms = this.getPermissions(user, channel);
         tags.forEach(tag => {
@@ -172,24 +201,5 @@ case ${types}.${t.name}_BOT:${text}=${strings}.BOT_TAG_BOT+" • ${t.displayName
             }
         });
         return type;
-    },
-
-    getTagForSidebar(props: any): number | null {
-        const { user, channel } = props;
-        let botTag = user.bot ? Tags.BOT : null;
-        const settings = Settings.plugins[this.name];
-        if ("showInMembersList" in settings && !settings.showInMembersList) return botTag;
-        const perms = this.getPermissions(user, channel);
-        tags.forEach(tag => {
-            if (`showTag_${tag.name}` in settings && !settings[`showTag_${tag.name}`]) return;
-            if (tag.permissions?.find(perm => perms.includes(perm))
-                || (tag.condition && tag.condition(null, user, channel))
-            ) {
-                if (user.bot && !settings.dontShowBotTag) botTag = Tags[`${tag.name}_BOT`];
-                else botTag = Tags[tag.name];
-                if (!tag.botAndOpCases) botTag = Tags[tag.name];
-            }
-        });
-        return botTag;
     }
 });
