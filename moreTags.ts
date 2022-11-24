@@ -25,7 +25,7 @@ import { waitFor } from "../webpack";
 import { ChannelStore, GuildStore } from "../webpack/common";
 
 let Permissions: Record<string, bigint>, computePermissions: ({ ...args }) => bigint,
-    Tags: Record<string, number> /* really a Record<(string, number) | (number, string)> but not needed here*/;
+    Tags: Record<string, number>;
 waitFor(["VIEW_CREATOR_MONETIZATION_ANALYTICS"], m => Permissions = m);
 waitFor(["canEveryoneRole"], m => ({ computePermissions } = m));
 waitFor(m => m.Types?.[0] === "BOT", m => Tags = m.Types);
@@ -36,9 +36,9 @@ interface Tag {
     // name shown on the tag itself, can be anything probably; automatically uppercase'd
     displayName: string;
     description: string;
-    botAndOpCases?: boolean;
+    botAndOpCases: boolean;
     permissions?: string[];
-    condition?: (message: Message | null, user: User, channel: Channel | undefined) => boolean;
+    condition?: (message: Message | null, user: User, channel: Channel) => boolean;
 }
 const tags: Tag[] = [{
     name: "WEBHOOK",
@@ -80,6 +80,24 @@ const tags: Tag[] = [{
 // index used for assigning id's to tags
 let i = 999;
 
+// becuase channel id isn't available in user poputs by default where the tag is rendered
+const passChannelIdDownProps = [
+    {
+        find: ".hasAvatarForGuild(null==",
+        replacement: {
+            match: /\(\).usernameSection,user/,
+            replace: "().usernameSection,moreTags_channelId:arguments[0].channelId,user"
+        }
+    },
+    {
+        find: "().copiableNameTag",
+        replacement: {
+            match: /discriminatorClass:(.{1,100}),botClass:/,
+            replace: "discriminatorClass:$1,moreTags_channelId:arguments[0].moreTags_channelId,botClass:"
+        }
+    }
+];
+
 export default definePlugin({
     name: "More Tags",
     description: "Adds tags for webhooks and moderative roles (owner, admin, etc.) (disable Webhook Tags first!)",
@@ -112,6 +130,8 @@ export default definePlugin({
                 {
                     match: /(.)\[.\.BOT=0\]="BOT";/,
                     replace: (orig, types) =>
+                        // for refence, a tag looks like this
+                        // e[e.BOT=0]="BOT";
                         `${tags.map(t =>
                             `${types}[${types}.${t.name}=${i--}]="${t.name}";\
 ${t.botAndOpCases ? `${types}[${types}.${t.name}_OP=${i--}]="${t.name}_OP";${types}[${types}.${t.name}_BOT=${i--}]="${t.name}_BOT";` : ""}`
@@ -121,6 +141,8 @@ ${t.botAndOpCases ? `${types}[${types}.${t.name}_OP=${i--}]="${t.name}_OP";${typ
                     match: /case (.)\.BOT:default:(.)=(.{1,20})\.BOT/,
                     replace: (orig, types, text, strings) =>
                         `${tags.map(t =>
+                            // for refence, a case looks like this
+                            // case r.SERVER:T = c.Z.Messages.BOT_TAG_SERVER;break;
                             `case ${types}.${t.name}:${text}="${t.displayName}";break;\
 ${t.botAndOpCases ? `case ${types}.${t.name}_OP:${text}=${strings}.BOT_TAG_FORUM_ORIGINAL_POSTER+" • ${t.displayName}";break;\
 case ${types}.${t.name}_BOT:${text}=${strings}.BOT_TAG_BOT+" • ${t.displayName}";break;` : ""}`
@@ -128,23 +150,26 @@ case ${types}.${t.name}_BOT:${text}=${strings}.BOT_TAG_BOT+" • ${t.displayName
                 },
             ],
         },
+        // messages
         {
             find: ".Types.ORIGINAL_POSTER",
             replacement: {
                 match: /return null==(.{1,2})\?null:\(0,/,
                 replace: (orig, type) => `${type}=Vencord.Plugins.plugins["More Tags"]\
-.getTag({...arguments[0],channelId:arguments[0].channel?.id,origType:${type}});${orig}`
+.getTag({...arguments[0],origType:${type}});${orig}`
             }
         },
+        // member list
         {
             find: ".renderBot=function(){",
             replacement: {
                 match: /this.props.user;return null!=(.{1,2})&&.{0,10}\?(.{0,50})\(\)\.botTag/,
                 replace: "this.props.user;var type=Vencord.Plugins.plugins[\"More Tags\"]\
-.getTag({...this.props,channelId:this.props.channel.id,origType:$1.bot?0:null});\
+.getTag({...this.props,origType:$1.bot?0:null});\
 return type!==null?$2().botTag,type"
             }
         },
+        // in profiles
         {
             find: ",botType:",
             replacement: {
@@ -153,22 +178,7 @@ return type!==null?$2().botTag,type"
 .getTag({user:$2,channelId:arguments[0].moreTags_channelId,origType:$1}),"
             }
         },
-
-        // :trollface:
-        {
-            find: ".hasAvatarForGuild(null==",
-            replacement: {
-                match: /\(\).usernameSection,user/,
-                replace: "().usernameSection,moreTags_channelId:arguments[0].channelId,user"
-            }
-        },
-        {
-            find: "().copiableNameTag",
-            replacement: {
-                match: /discriminatorClass:(.{1,100}),botClass:/,
-                replace: "discriminatorClass:$1,moreTags_channelId:arguments[0].moreTags_channelId,botClass:"
-            }
-        }
+        ...passChannelIdDownProps
     ],
 
     getPermissions(user: User, channel: Channel): string[] {
@@ -181,23 +191,29 @@ return type!==null?$2().botTag,type"
         ).filter(i => i);
     },
 
-    getTag(args: any) {
+    getTag(args: any): number | null {
         // note: everything other than user can be undefined
-        const { message, user, channelId, origType } = args;
+        const { message, user, channel, channelId, origType } = args;
         let type = typeof origType === "number" ? origType : null;
-        const channel = ChannelStore.getChannel(channelId) as any;
-        if (!channel) return type;
+        // "as any" cast because the Channel type doesn't have .isForumPost() yet
+        const actualChannel = channel ?? ChannelStore.getChannel(channelId) as any;
+        if (!actualChannel) return type;
+
         const settings = Settings.plugins[this.name];
-        const perms = this.getPermissions(user, channel);
+        const perms = this.getPermissions(user, actualChannel);
+
         tags.forEach(tag => {
             if (`showTag_${tag.name}` in settings && !settings[`showTag_${tag.name}`]) return;
             if (tag.permissions?.find(perm => perms.includes(perm))
-                || (tag.condition && tag.condition(message, user, channel))
+                || (tag.condition && tag.condition(message, user, actualChannel))
             ) {
-                if (channel?.isForumPost() && channel.ownerId === user.id) type = Tags[`${tag.name}_OP`];
+                if (!tag.botAndOpCases) {
+                    type = Tags[tag.name];
+                    return;
+                }
+                if (actualChannel.isForumPost() && actualChannel.ownerId === user.id) type = Tags[`${tag.name}_OP`];
                 else if (user.bot && !settings.dontShowBotTag) type = Tags[`${tag.name}_BOT`];
                 else type = Tags[tag.name];
-                if (!tag.botAndOpCases) type = Tags[tag.name];
             }
         });
         return type;
