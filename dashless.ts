@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import definePlugin from "../utils/types";
+import definePlugin from "@utils/types";
 
 export default definePlugin({
     name: "Dashless",
@@ -41,7 +41,7 @@ export default definePlugin({
             replacement: {
                 match: /var (.{1,2})=(.{1,2}).children,(.{0,120});return\(/,
                 replace: "var $1=$2.children,$3;\
-                if(typeof $1[0].props?.children==='string')$1[0].props.children=$1[0].props.children.replace(/-/g,' ');\
+                if(typeof $1[0]?.props?.children==='string')$1[0].props.children=$1[0].props.children.replace(/-/g,' ');\
                 return("
             }
         },
