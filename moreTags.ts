@@ -16,13 +16,13 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+import { Devs } from "@utils/constants";
+import definePlugin, { OptionType } from "@utils/types";
+import { waitFor } from "@webpack";
+import { ChannelStore, GuildStore } from "@webpack/common";
 import { Channel, Message, User } from "discord-types/general";
 
-import { Devs } from "../utils/constants";
-import definePlugin, { OptionType } from "../utils/types";
 import { Settings } from "../Vencord";
-import { waitFor } from "../webpack";
-import { ChannelStore, GuildStore } from "../webpack/common";
 
 let Permissions: Record<string, bigint>, computePermissions: ({ ...args }) => bigint,
     Tags: Record<string, number>;
@@ -106,20 +106,28 @@ export default definePlugin({
         id: 406028027768733696n
     }],
     options: {
-        showInMembersList: {
-            description: "Show tags in member sidebar",
-            type: OptionType.BOOLEAN,
-            default: true
-        },
         dontShowBotTag: {
             description: "Don't show \"BOT\" text for bots with other tags (verified bots will still have checkmark)",
             type: OptionType.BOOLEAN
         },
         ...Object.fromEntries(tags.map(t => [
-            `showTag_${t.name}`, {
+            `visibility_${t.name}`, {
                 description: `Show ${t.displayName} tags (${t.description})`,
-                type: OptionType.BOOLEAN,
-                default: true
+                type: OptionType.SELECT,
+                options: [{
+                    label: "Always",
+                    value: "always",
+                    default: true
+                }, {
+                    label: "Only in chat",
+                    value: "chat"
+                }, {
+                    label: "Only in memeber list and profiles",
+                    value: "not-chat"
+                }, {
+                    label: "Never",
+                    value: "never"
+                }]
             }
         ]))
     },
@@ -130,7 +138,6 @@ export default definePlugin({
                 {
                     match: /(.)\[.\.BOT=0\]="BOT";/,
                     replace: (orig, types) =>
-                        // for refence, a tag looks like this
                         // e[e.BOT=0]="BOT";
                         `${tags.map(t =>
                             `${types}[${types}.${t.name}=${i--}]="${t.name}";\
@@ -141,7 +148,6 @@ ${t.botAndOpCases ? `${types}[${types}.${t.name}_OP=${i--}]="${t.name}_OP";${typ
                     match: /case (.)\.BOT:default:(.)=(.{1,20})\.BOT/,
                     replace: (orig, types, text, strings) =>
                         `${tags.map(t =>
-                            // for refence, a case looks like this
                             // case r.SERVER:T = c.Z.Messages.BOT_TAG_SERVER;break;
                             `case ${types}.${t.name}:${text}="${t.displayName}";break;\
 ${t.botAndOpCases ? `case ${types}.${t.name}_OP:${text}=${strings}.BOT_TAG_FORUM_ORIGINAL_POSTER+" • ${t.displayName}";break;\
@@ -156,7 +162,7 @@ case ${types}.${t.name}_BOT:${text}=${strings}.BOT_TAG_BOT+" • ${t.displayName
             replacement: {
                 match: /return null==(.{1,2})\?null:\(0,/,
                 replace: (orig, type) => `${type}=Vencord.Plugins.plugins["More Tags"]\
-.getTag({...arguments[0],origType:${type}});${orig}`
+.getTag({...arguments[0],origType:${type},location:"chat"});${orig}`
             }
         },
         // member list
@@ -165,7 +171,7 @@ case ${types}.${t.name}_BOT:${text}=${strings}.BOT_TAG_BOT+" • ${t.displayName
             replacement: {
                 match: /this.props.user;return null!=(.{1,2})&&.{0,10}\?(.{0,50})\(\)\.botTag/,
                 replace: "this.props.user;var type=Vencord.Plugins.plugins[\"More Tags\"]\
-.getTag({...this.props,origType:$1.bot?0:null});\
+.getTag({...this.props,origType:$1.bot?0:null,location:'not-chat'});\
 return type!==null?$2().botTag,type"
             }
         },
@@ -175,7 +181,7 @@ return type!==null?$2().botTag,type"
             replacement: {
                 match: /,botType:(.{1,2}\((.{1,2})\)),/,
                 replace: ",botType:Vencord.Plugins.plugins[\"More Tags\"]\
-.getTag({user:$2,channelId:arguments[0].moreTags_channelId,origType:$1}),"
+.getTag({user:$2,channelId:arguments[0].moreTags_channelId,origType:$1,location:'not-chat'}),"
             }
         },
         ...passChannelIdDownProps
@@ -192,8 +198,8 @@ return type!==null?$2().botTag,type"
     },
 
     getTag(args: any): number | null {
-        // note: everything other than user can be undefined
-        const { message, user, channel, channelId, origType } = args;
+        // note: everything other than user and location can be undefined
+        const { message, user, channel, channelId, origType, location } = args;
         let type = typeof origType === "number" ? origType : null;
         // "as any" cast because the Channel type doesn't have .isForumPost() yet
         const actualChannel = channel ?? ChannelStore.getChannel(channelId) as any;
@@ -203,7 +209,7 @@ return type!==null?$2().botTag,type"
         const perms = this.getPermissions(user, actualChannel);
 
         tags.forEach(tag => {
-            if (`showTag_${tag.name}` in settings && !settings[`showTag_${tag.name}`]) return;
+            if (![location, "always"].includes(settings[`visibility_${tag.name}`])) return;
             if (tag.permissions?.find(perm => perms.includes(perm))
                 || (tag.condition && tag.condition(message, user, actualChannel))
             ) {
