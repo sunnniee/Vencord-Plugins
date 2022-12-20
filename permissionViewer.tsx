@@ -21,7 +21,7 @@ import { ModalContent, ModalHeader, ModalRoot, ModalSize, openModal } from "@uti
 import { Queue } from "@utils/Queue";
 import definePlugin from "@utils/types";
 import { findByCode, findByPropsLazy, waitFor } from "@webpack";
-import { ChannelStore, GuildStore, Menu, React, Text, Tooltip, UserStore, UserUtils } from "@webpack/common";
+import { ChannelStore, GuildStore, Menu, Parser, React, Text, Tooltip, UserStore, UserUtils } from "@webpack/common";
 import { Channel, Guild, User } from "discord-types/general";
 
 
@@ -46,16 +46,27 @@ function getPermissions(user: User, channel: Channel, guild?: Guild) {
     return computePermissions({ user, context: guild, overwrites: channel.permissionOverwrites });
 }
 
-interface PermissonsProps {
-    permissions: bigint;
-    [key: string]: any;
+function hasPermission(p: string, perms: bigint, overwrites?: { allow: bigint, deny: bigint, type: number; }) {
+    const value = {} as { has: boolean, fromOverwrite: boolean; };
+    const permInt = Permissions[p];
+    if (perms & permInt) value.has = true;
+    else value.has = false;
+    if (!overwrites) return { ...value, fromOverwrite: false };
+    if (overwrites.allow & permInt) {
+        value.has = true;
+        value.fromOverwrite = true;
+    }
+    if (overwrites.deny & permInt) {
+        value.has = false;
+        value.fromOverwrite = true;
+    }
+    if (!("fromOverwrite" in value)) value.fromOverwrite = false;
+    return value;
 }
+
 interface PermIconProps {
     variant: "allowed" | "denied";
-    [key: string]: any;
-}
-interface GuildMenuProps {
-    guild: Guild;
+    colorful: boolean;
     [key: string]: any;
 }
 
@@ -67,12 +78,15 @@ function makeRoleDot(color: number) {
 // this plugin is proof i shouldn't be allowed anywhere near react
 const Components = {
     PermissionIcon(props: PermIconProps) {
-        switch (props.variant) {
+        const { variant, colorful } = props;
+        switch (variant) {
             case "allowed":
-                return <svg height="36" viewBox="-4 -4 44 44" width="36"><path d="M0 0h36v36H0z" fill="none" /><path fill="#3ba55d" d="M13.5 24.255 7.245 18l-2.13 2.115L13.5 28.5 31.5 10.5l-2.115 -2.115z" /></svg>;
+                return <svg height="36" viewBox="-4 -4 44 44" width="36">
+                    <path d="M0 0h36v36H0z" fill="none" /><path fill={colorful ? "var(--status-green-600)" : "var(--text-normal)"} d="M13.5 24.255 7.245 18l-2.13 2.115L13.5 28.5 31.5 10.5l-2.115 -2.115z" /></svg>;
             case "denied":
-            default: // will never happen but ts yells at me if i dont include it
-                return <svg height="36" viewBox="-4 -4 56 56" width="36"><path d="M0 0h48v48H0z" fill="none" /><path fill="#ed4245" d="M24 4C12.96 4 4 12.96 4 24s8.96 20 20 20 20-8.96 20-20S35.04 4 24 4zm0 36c-8.84 0-16-7.16-16-16 0-3.7 1.26-7.1 3.38-9.8L33.8 36.62C31.1 38.74 27.7 40 24 40zm12.62-6.2L14.2 11.38C16.9 9.26 20.3 8 24 8c8.84 0 16 7.16 16 16 0 3.7-1.26 7.1-3.38 9.8z" /></svg>;
+            default:
+                return <svg height="36" viewBox="-4 -4 56 56" width="36">
+                    <path d="M0 0h48v48H0z" fill="none" /><path fill={colorful ? "var(--status-red-500)" : "var(--text-normal)"} d="M24 4C12.96 4 4 12.96 4 24s8.96 20 20 20 20-8.96 20-20S35.04 4 24 4zm0 36c-8.84 0-16-7.16-16-16 0-3.7 1.26-7.1 3.38-9.8L33.8 36.62C31.1 38.74 27.7 40 24 40zm12.62-6.2L14.2 11.38C16.9 9.26 20.3 8 24 8c8.84 0 16 7.16 16 16 0 3.7-1.26 7.1-3.38 9.8z" /></svg>;
         }
 
     },
@@ -108,11 +122,11 @@ const Components = {
             }
         </div>;
     },
-    Permissions: (props: PermissonsProps) => <>
+    Permissions: (props: { permissions: bigint; }) => <>
         {Object.entries(Permissions).map(([perm, permInt]) =>
             <>
                 <Text variant="text-md/semibold">
-                    <Components.PermissionIcon variant={props.permissions & permInt ? "allowed" : "denied"} />
+                    <Components.PermissionIcon variant={props.permissions & permInt ? "allowed" : "denied"} colorful />
                     {toTitleCase(perm)}
                 </Text>
                 <Components.Separator />
@@ -120,7 +134,49 @@ const Components = {
         )}
         <Components.Padding />
     </>,
-    GuildPermissions(props: GuildMenuProps) {
+    ChannelPermissions(props: { guild: Guild, channel: Channel; }) {
+        const { guild, channel } = props;
+        const roles = Object.entries(guild.roles).filter(([id]) => channel.permissionOverwrites[id]);
+        if (!roles.length) return <Text variant="text-lg/bold">No role permission overwrites</Text>;
+        const [role, setRole] = React.useState(roles[0][1].id);
+        return <div style={{ display: "grid", gridTemplateColumns: "1fr 3fr", gap: "10px" }}>
+            <div>
+                <Menu.ContextMenu navId="roles" onClose={() => { }} hideScroller>
+                    {roles.map(([id, item]) =>
+                        <Menu.MenuGroup key={id}>
+                            <Menu.MenuItem
+                                id={id}
+                                key={id}
+                                label={item.name}
+                                icon={makeRoleDot(item.color)}
+                                action={() => setRole(id)}
+                            />
+                        </Menu.MenuGroup>
+                    )}
+                </Menu.ContextMenu>
+                <Text variant="text-xxs/normal">(only role overwrites are shown)</Text>
+            </div>
+            <div>
+                <Text variant="text-lg/semibold">Permissions for {guild.roles[role].name}</Text>
+                {Object.entries(Permissions).map(([perm]) => {
+                    const p = hasPermission(perm, guild.roles[role].permissions, channel.permissionOverwrites[role]);
+                    return <>
+                        <Text variant="text-md/semibold">
+                            <Components.PermissionIcon
+                                variant={p.has ? "allowed" : "denied"}
+                                colorful={p.fromOverwrite}
+                            />
+                            {toTitleCase(perm)}
+                        </Text>
+                        <Components.Separator />
+                    </>;
+                })}
+                <Components.Padding />
+            </div>
+        </div>;
+
+    },
+    GuildPermissions(props: { guild: Guild; }) {
         const { guild } = props;
         const roles = Object.entries(guild.roles);
         const [role, setRole] = React.useState(roles[0][1].id);
@@ -168,10 +224,18 @@ export default definePlugin({
             match: /children:\[.{1,2},__OVERLAY__.{1,20}\]/,
             replace: "$&.concat([Vencord.Plugins.plugins.PermissionViewer.guildMenuItem(arguments[0].guild)])"
         }
+    }, {
+        find: ",\"channel-actions\")",
+        // both channels and categories
+        all: true,
+        replacement: {
+            match: /"mark-as-read".{1,30}children:\[.{1,20}\]/,
+            replace: "$&.concat(Vencord.Plugins.plugins.PermissionViewer.channelMenuItem(arguments[0]))"
+        }
     }],
 
     userMenuItem(props: any): JSX.Element | null {
-        const { channelId, user } = props;
+        const { channelId, user }: { channelId: string, user: User; } = props;
         const channel = ChannelStore.getChannel(channelId);
         if (!channel) return null;
         const guild = GuildStore.getGuild(channel.guild_id);
@@ -197,6 +261,27 @@ export default definePlugin({
                         </ModalContent>
                     </ModalRoot>
                 );
+            }}
+        />;
+    },
+
+    channelMenuItem(props: any): JSX.Element | null {
+        const { guild, channel }: { guild: Guild, channel: Channel; } = props;
+        if (!channel) return null;
+        return <Menu.MenuItem
+            id="permissions"
+            key="permissions"
+            label="View Permissions"
+            action={() => {
+                openModal(modalProps =>
+                    <ModalRoot size={ModalSize.LARGE} {...modalProps}>
+                        <ModalHeader>
+                            <Text variant="heading-md/bold">{Parser.parse(`<#${channel.id}>`)}</Text>
+                        </ModalHeader>
+                        <ModalContent>
+                            <Components.ChannelPermissions guild={guild} channel={channel} />
+                        </ModalContent>
+                    </ModalRoot>);
             }}
         />;
     },
