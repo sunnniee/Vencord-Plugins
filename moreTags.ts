@@ -24,11 +24,12 @@ import { Channel, Message, User } from "discord-types/general";
 
 import { Settings } from "../Vencord";
 
-let Permissions: Record<string, bigint>, computePermissions: ({ ...args }) => bigint,
-    Tags: Record<string, number>;
-waitFor(["VIEW_CREATOR_MONETIZATION_ANALYTICS"], m => Permissions = m);
-waitFor(["canEveryoneRole"], m => ({ computePermissions } = m));
+let Permissions: Record<string, bigint>, computePermissions: ({ ...args }) => bigint, Tags: Record<string, number>;
+waitFor(["SEND_MESSAGES", "VIEW_CREATOR_MONETIZATION_ANALYTICS"], m => Permissions = m);
+waitFor(["computePermissions", "canEveryoneRole"], m => ({ computePermissions } = m));
 waitFor(m => m.Types?.[0] === "BOT", m => Tags = m.Types);
+
+const isWebhook = (message, user) => message?.webhookId && user.isNonUserBot();
 
 interface Tag {
     // name used for identifying, must be alphanumeric + underscores
@@ -36,7 +37,6 @@ interface Tag {
     // name shown on the tag itself, can be anything probably; automatically uppercase'd
     displayName: string;
     description: string;
-    botAndOpCases: boolean;
     permissions?: string[];
     condition?: (message: Message | null, user: User, channel: Channel) => boolean;
 }
@@ -44,53 +44,53 @@ const tags: Tag[] = [{
     name: "WEBHOOK",
     displayName: "Webhook",
     description: "Messages sent by webhooks",
-    botAndOpCases: false,
-    condition(message, user) {
-        return message?.webhookId && user.isNonUserBot();
-    }
+    condition: isWebhook
 }, {
     name: "OWNER",
     displayName: "Owner",
     description: "Owns the server",
-    botAndOpCases: true,
-    condition(_, user, channel) {
-        return GuildStore.getGuild(channel?.guild_id)?.ownerId === user.id;
-    }
+    condition: (_, user, channel) => GuildStore.getGuild(channel?.guild_id)?.ownerId === user.id
 }, {
     name: "ADMINISTRATOR",
     displayName: "Admin",
     description: "Has the administrator permission",
-    botAndOpCases: true,
     permissions: ["ADMINISTRATOR"]
 }, {
     name: "MODERATOR_STAFF",
     displayName: "Staff",
     description: "Can manage the server, channels or roles",
-    botAndOpCases: true,
     permissions: ["MANAGE_GUILD", "MANAGE_CHANNELS", "MANAGE_ROLES"]
 }, {
     name: "MODERATOR",
     displayName: "Mod",
     description: "Can manage messages or kick/ban people",
-    botAndOpCases: true,
     permissions: ["MANAGE_MESSAGES", "KICK_MEMBERS", "BAN_MEMBERS"]
+}, {
+    name: "MODERATOR_VC",
+    displayName: "VC Mod",
+    description: "Can manage voice chats",
+    permissions: ["MOVE_MEMBERS", "MUTE_MEMBERS", "DEAFEN_MEMBERS"]
     // reversed so higher entries have priority over lower entries
 }].reverse();
 
-// index used for assigning id's to tags
 let i = 999;
+// e[e.BOT=0]="BOT";
+const addTagVar = (name: string, types: string) => `${types}[${types}.${name}=${i--}]="${name}"`;
+// case r.SERVER:T=c.Z.Messages.BOT_TAG_SERVER;break;
+const addTagCase = (name: string, displayName: string, types: string, textVar: string) =>
+    `case ${types}.${name}:${textVar}=${displayName};break;`;
 
-// becuase channel id isn't available in user poputs by default where the tag is rendered
+// because channel id isn't available in user profiles by default where the tag is rendered
 const passChannelIdDownProps = [
     {
         find: ".hasAvatarForGuild(null==",
         replacement: {
-            match: /\(\).usernameSection,user/,
-            replace: "().usernameSection,moreTags_channelId:arguments[0].channelId,user"
+            match: /\.usernameSection,user/,
+            replace: ".usernameSection,moreTags_channelId:arguments[0].channelId,user"
         }
     },
     {
-        find: "().copiableNameTag",
+        find: "copyMetaData:\"User Tag\"",
         replacement: {
             match: /discriminatorClass:(.{1,100}),botClass:/,
             replace: "discriminatorClass:$1,moreTags_channelId:arguments[0].moreTags_channelId,botClass:"
@@ -100,15 +100,17 @@ const passChannelIdDownProps = [
 
 export default definePlugin({
     name: "More Tags",
-    description: "Adds tags for webhooks and moderative roles (owner, admin, etc.) (disable Webhook Tags first!)",
-    authors: [Devs.Cyn, {
-        name: "ActuallyTheSun",
-        id: 406028027768733696n
-    }],
+    description: "Adds tags for webhooks and moderative roles (owner, admin, etc.)",
+    authors: [Devs.Cyn, Devs.TheSun],
     options: {
         dontShowBotTag: {
-            description: "Don't show \"BOT\" text for bots with other tags (verified bots will still have checkmark)",
+            description: "Don't show [BOT] text for bots with other tags (verified bots will still have checkmark)",
             type: OptionType.BOOLEAN
+        },
+        clydeSystemTag: {
+            description: "Show system tag for Clyde",
+            type: OptionType.BOOLEAN,
+            default: true
         },
         ...Object.fromEntries(tags.map(t => [
             `visibility_${t.name}`, {
@@ -132,93 +134,94 @@ export default definePlugin({
         ]))
     },
     patches: [
+        // add tags to the tag list
         {
             find: '.BOT=0]="BOT"',
             replacement: [
                 {
-                    match: /(.)\[.\.BOT=0\]="BOT";/,
+                    match: /(\i)\[.\.BOT=0\]="BOT";/,
                     replace: (orig, types) =>
                         // e[e.BOT=0]="BOT";
-                        `${tags.map(t =>
-                            `${types}[${types}.${t.name}=${i--}]="${t.name}";\
-${t.botAndOpCases ? `${types}[${types}.${t.name}_OP=${i--}]="${t.name}_OP";${types}[${types}.${t.name}_BOT=${i--}]="${t.name}_BOT";` : ""}`
+                        `${tags.map((t, i) =>
+                            `${addTagVar(t.name, types)};${addTagVar(`${t.name}_OP`, types)};${addTagVar(`${t.name}_BOT`, types)};`
                         ).join("")}${orig}`
                 },
                 {
-                    match: /case (.)\.BOT:default:(.)=(.{1,20})\.BOT/,
+                    match: /case (\i)\.BOT:default:(\i)=(.{1,20})\.BOT/,
                     replace: (orig, types, text, strings) =>
                         `${tags.map(t =>
-                            // case r.SERVER:T = c.Z.Messages.BOT_TAG_SERVER;break;
-                            `case ${types}.${t.name}:${text}="${t.displayName}";break;\
-${t.botAndOpCases ? `case ${types}.${t.name}_OP:${text}=${strings}.BOT_TAG_FORUM_ORIGINAL_POSTER+" • ${t.displayName}";break;\
-case ${types}.${t.name}_BOT:${text}=${strings}.BOT_TAG_BOT+" • ${t.displayName}";break;` : ""}`
+                            `${addTagCase(t.name, `"${t.displayName}"`, types, text)}\
+                            ${addTagCase(`${t.name}_OP`, `${strings}.BOT_TAG_FORUM_ORIGINAL_POSTER+" • ${t.displayName}"`, types, text)}\
+                            ${addTagCase(`${t.name}_BOT`, `${strings}.BOT_TAG_BOT+" • ${t.displayName}"`, types, text)}`
                         ).join("")}${orig}`
                 },
+                // show OP tags correctly
+                {
+                    match: /(\i)=(\i)===\i\.ORIGINAL_POSTER/,
+                    replace: "$1=$self.isOPTag($2)"
+                }
             ],
         },
-        // messages
+        // in messages
         {
             find: ".Types.ORIGINAL_POSTER",
             replacement: {
-                match: /return null==(.{1,2})\?null:\(0,/,
-                replace: (orig, type) => `${type}=Vencord.Plugins.plugins["More Tags"]\
-.getTag({...arguments[0],origType:${type},location:"chat"});${orig}`
+                match: /return null==(\i)\?null:\(0,/,
+                replace: "$1=$self.getTag({...arguments[0],origType:$1,location:'chat'});$&"
             }
         },
-        // member list
+        // in the member list
         {
             find: ".renderBot=function(){",
             replacement: {
-                match: /this.props.user;return null!=(.{1,2})&&.{0,10}\?(.{0,50})\(\)\.botTag/,
-                replace: "this.props.user;var type=Vencord.Plugins.plugins[\"More Tags\"]\
-.getTag({...this.props,origType:$1.bot?0:null,location:'not-chat'});\
-return type!==null?$2().botTag,type"
+                match: /this.props.user;return null!=(\i)&&.{0,10}\?(.{0,50})\.botTag/,
+                replace: "this.props.user;var type=$self.getTag({...this.props,origType:$1.bot?0:null,location:'not-chat'});\
+return type!==null?$2.botTag,type"
             }
         },
         // in profiles
         {
             find: ",botType:",
             replacement: {
-                match: /,botType:(.{1,2}\((.{1,2})\)),/,
-                replace: ",botType:Vencord.Plugins.plugins[\"More Tags\"]\
-.getTag({user:$2,channelId:arguments[0].moreTags_channelId,origType:$1,location:'not-chat'}),"
+                match: /,botType:(\i\((\i)\)),/,
+                replace: ",botType:$self.getTag({user:$2,channelId:arguments[0].moreTags_channelId,origType:$1,location:'not-chat'}),"
             }
         },
         ...passChannelIdDownProps
     ],
 
     getPermissions(user: User, channel: Channel): string[] {
-        if (!channel) return [];
-        const guild = GuildStore.getGuild(channel.guild_id);
+        const guild = GuildStore.getGuild(channel?.guild_id);
         if (!guild) return [];
+        // PermissionStore.computePermissions is not the same function and doesn't work here
         const permissions = computePermissions({ user, context: guild, overwrites: channel.permissionOverwrites });
         return Object.entries(Permissions).map(([perm, permInt]) =>
             permissions & permInt ? perm : ""
-        ).filter(i => i);
+        ).filter(Boolean);
     },
+
+    isOPTag: (tag: number) => tag === Tags.ORIGINAL_POSTER || tags.some(t => tag === Tags[`${t.name}_OP`]),
 
     getTag(args: any): number | null {
         // note: everything other than user and location can be undefined
-        const { message, user, channel, channelId, origType, location } = args;
+        const { message, user, channelId, origType, location } = args;
+        let { channel } = args;
         let type = typeof origType === "number" ? origType : null;
         // "as any" cast because the Channel type doesn't have .isForumPost() yet
-        const actualChannel = channel ?? ChannelStore.getChannel(channelId) as any;
-        if (!actualChannel) return type;
+        channel ??= ChannelStore.getChannel(channelId) as any;
 
         const settings = Settings.plugins[this.name];
-        const perms = this.getPermissions(user, actualChannel);
+        const perms = this.getPermissions(user, channel);
 
+        if (location === "chat" && user.id === "1" && settings.clydeSystemTag) return Tags.OFFICIAL;
         tags.forEach(tag => {
             if (![location, "always"].includes(settings[`visibility_${tag.name}`])) return;
+
             if (tag.permissions?.find(perm => perms.includes(perm))
-                || (tag.condition && tag.condition(message, user, actualChannel))
+                || (tag.condition?.(message, user, channel))
             ) {
-                if (!tag.botAndOpCases) {
-                    type = Tags[tag.name];
-                    return;
-                }
-                if (actualChannel.isForumPost() && actualChannel.ownerId === user.id) type = Tags[`${tag.name}_OP`];
-                else if (user.bot && !settings.dontShowBotTag) type = Tags[`${tag.name}_BOT`];
+                if (channel.isForumPost() && channel.ownerId === user.id) type = Tags[`${tag.name}_OP`];
+                else if (user.bot && !isWebhook(message, user) && !settings.dontShowBotTag) type = Tags[`${tag.name}_BOT`];
                 else type = Tags[tag.name];
             }
         });

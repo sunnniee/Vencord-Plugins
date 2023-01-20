@@ -60,6 +60,7 @@ function hasPermission(p: string, perms: bigint, overwrites?: { allow: bigint, d
         value.has = false;
         value.fromOverwrite = true;
     }
+    // @ts-ignore: "Property 'fromOverwrite' does not exist on type 'never'"
     if (!("fromOverwrite" in value)) value.fromOverwrite = false;
     return value;
 }
