@@ -16,13 +16,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+import { migratePluginSettings, Settings } from "@api/settings";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { waitFor } from "@webpack";
 import { ChannelStore, GuildStore } from "@webpack/common";
 import { Channel, Message, User } from "discord-types/general";
-
-import { Settings } from "../Vencord";
 
 let Permissions: Record<string, bigint>, computePermissions: ({ ...args }) => bigint, Tags: Record<string, number>;
 waitFor(["SEND_MESSAGES", "VIEW_CREATOR_MONETIZATION_ANALYTICS"], m => Permissions = m);
@@ -98,8 +97,9 @@ const passChannelIdDownProps = [
     }
 ];
 
+migratePluginSettings("StaffTags", "More Tags");
 export default definePlugin({
-    name: "More Tags",
+    name: "StaffTags",
     description: "Adds tags for webhooks and moderative roles (owner, admin, etc.)",
     authors: [Devs.Cyn, Devs.TheSun],
     options: {
