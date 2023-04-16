@@ -1,6 +1,6 @@
 # vencord plguins
 
-random stuff i made, no guaratee it will actually work!
+dead repo everything here either doesnt work or is in main vencord
 
 ### how 2 install your own plugins
 first [get a vencord dev install](https://github.com/Vendicated/Vencord/blob/main/docs/1_INSTALLING.md)
